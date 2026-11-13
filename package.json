@@ -1,0 +1,30 @@
+{
+  "name": "momentwindow",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:client": "vite --config client/vite.config.ts",
+    "build:client": "vite build --config client/vite.config.ts",
+    "dev:edge": "wrangler dev --config edge/wrangler.jsonc --port 8787",
+    "dev:builder": "node --experimental-strip-types scripts/builder-server.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mapbox/vector-tile": "3.0.0",
+    "geotiff": "3.0.5",
+    "h3-js": "4.5.0",
+    "pbf": "5.1.2",
+    "pngjs": "7.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261113.1",
+    "@types/node": "26.6.6",
+    "@types/pngjs": "6.0.5",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.0",
+    "wrangler": "4.161.0"
+  }
+}

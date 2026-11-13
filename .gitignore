@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+edge/.dev.vars
+.wrangler
+.vercel
+*.log

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Moment</title>
+<meta name="description" content="A live watercolour window onto the neighbourhood you are in, painted from real maps, real terrain and real weather.">
+<meta name="theme-color" content="#e4e7ea">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Reenie+Beanie&display=swap">
+<!--BOOT-->
+</head>
+<body>
+<main class="desk">
+  <div class="window">
+    <div class="card" id="card">
+      <canvas id="stage" role="img" aria-label="Painting the neighbourhood in watercolour"></canvas>
+      <canvas id="gl" aria-hidden="true"></canvas>
+      <canvas id="fade" aria-hidden="true"></canvas>
+      <canvas id="life" aria-hidden="true"></canvas>
+      <span id="status" class="status" role="status">Finding where you are…</span>
+    </div>
+    <p id="line" class="line" aria-live="polite">&nbsp;</p>
+    <p id="note" class="note" hidden></p>
+    <nav class="actions" aria-label="Moment">
+      <button type="button" id="send-btn">Send this moment</button>
+      <button type="button" id="exact-btn">Paint my exact area</button>
+      <button type="button" id="else-btn">Paint somewhere else</button>
+      <button type="button" id="credits-btn" class="quiet">Map data</button>
+      <a class="own" href="/">Paint your own moment</a>
+    </nav>
+  </div>
+</main>
+
+<dialog id="send" aria-labelledby="send-title">
+  <form id="send-form" method="dialog">
+    <h2 id="send-title">Send this moment</h2>
+    <p class="hint">The time, the weather, the light and everything moving are frozen as they are now. Whoever opens the link sees this moment, still alive.</p>
+    <canvas id="send-preview" class="preview" aria-hidden="true"></canvas>
+    <label for="send-note">A note on the back <span id="send-count" class="count">0 / 140</span></label>
+    <textarea id="send-note" maxlength="140" rows="2" placeholder="Thinking of you from here"></textarea>
+    <p id="send-error" class="error" role="alert"></p>
+    <div class="row"><button type="button" class="close quiet">Cancel</button><button type="submit" id="send-go" class="primary">Send this moment</button></div>
+  </form>
+  <div id="send-result" hidden>
+    <h2>Your postcard</h2>
+    <p class="hint">Anyone with this link sees the same frozen moment.</p>
+    <input id="send-url" readonly aria-label="Postcard link">
+    <div class="row"><button type="button" id="send-share">Share</button><button type="button" id="send-copy" class="primary">Copy link</button><button type="button" class="close quiet">Done</button></div>
+  </div>
+</dialog>
+
+<dialog id="search" aria-labelledby="search-title">
+  <form id="search-form">
+    <h2 id="search-title">Paint somewhere else</h2>
+    <p class="hint">A hometown, a harbour, a mountain village. Moment paints the neighbourhood around it, never a single address.</p>
+    <div class="row"><input id="search-q" type="search" autocomplete="off" placeholder="Naousa, Paros" aria-label="Place"><button type="submit" class="primary">Find</button></div>
+    <p id="search-error" class="error" role="status"></p>
+    <ul id="search-results" class="results"></ul>
+    <div class="row"><button type="button" class="close quiet">Close</button></div>
+  </form>
+</dialog>
+
+<dialog id="credits" aria-labelledby="credits-title">
+  <h2 id="credits-title">Map data</h2>
+  <p class="hint">Painted from open data. The satellite imagery is only read, never shown.</p>
+  <ul id="credits-list" class="credits"></ul>
+  <h3>Your location</h3>
+  <p class="hint">Moment uses the rough location your connection gives, snapped to a public place about 0.7 km² wide before anything is painted. Your IP address is never stored or logged, and exact coordinates are dropped once the cell is picked. Postcards keep only the cell and the public place they show.</p>
+  <div class="row"><button type="button" class="close primary">Close</button></div>
+</dialog>
+<link rel="stylesheet" href="/src/style.css">
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
