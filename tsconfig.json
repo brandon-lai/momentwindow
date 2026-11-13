@@ -13,5 +13,6 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": false
   },
-  "include": ["shared/**/*.ts", "builder/**/*.ts", "client/src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
+  "include": ["shared/**/*.ts", "builder/**/*.ts", "client/src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
+  "exclude": ["test/edge.test.ts"]
 }

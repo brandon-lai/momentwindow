@@ -7,7 +7,7 @@
     "build:client": "vite build --config client/vite.config.ts",
     "dev:edge": "wrangler dev --config edge/wrangler.jsonc --port 8787",
     "dev:builder": "node --experimental-strip-types scripts/builder-server.ts",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p edge",
     "test": "vitest run"
   },
   "dependencies": {

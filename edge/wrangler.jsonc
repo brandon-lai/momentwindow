@@ -13,5 +13,8 @@
     "BUILDER_URL": "https://momentwindow-builder.vercel.app/api/scene",
     "BUNDLE_VERSION": "1"
   },
-  "observability": { "enabled": true }
+  // Only the app's own log lines are kept (timings with a country and a
+  // resolution-5 cell). Cloudflare's per-request invocation logs carry the
+  // connecting IP, which the PRD says is never stored or logged: off.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } }
 }
