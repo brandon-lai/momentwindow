@@ -318,7 +318,7 @@ export async function buildScene(cell: string, opts: BuildOpts = {}): Promise<Sc
   if (wc) bundle.attribution.push("ESA WorldCover 10 m 2021 v200 (CC BY 4.0)");
   // trees
   const month = date.getUTCMonth() + 1;
-  bundle.trees = placeTrees(canopy, s2, { lat: lat0, elev: (x, y) => elevAt(x, y) + base, month, water, cap: 3000, priority: (x, y) => (inWindow(x, y) ? 1 : 0) });
+  bundle.trees = placeTrees(canopy, s2, { lat: lat0, elev: (x, y) => elevAt(x, y) + base, month, water, cap: 8000, priority: (x, y) => (inWindow(x, y) ? 1 : 0) });
   if (canopy) bundle.attribution.push("Meta and World Resources Institute, High Resolution Canopy Height Maps (CC BY 4.0)");
   notes.push(`${bundle.trees.length} trees`);
   // building colours from the imagery where OSM has none: roofs only (the

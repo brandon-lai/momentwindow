@@ -82,7 +82,11 @@ export function buildWorld(b: SceneBundle, m: Moment, seed: number): World {
   });
 
   const autumnish = (c: number[]) => c[0] > c[1] * 1.02 && c[0] > 60;
-  const trees: WTree[] = b.trees.map(t => {
+  // Phones draw at most 3,000 trees (the PRD's mobile cap). The bundle lists
+  // trees in an evenly thinned order, so the first 3,000 cover the window.
+  const nav = typeof navigator !== "undefined" ? (navigator as Navigator & { deviceMemory?: number }) : null;
+  const phone = !!nav && ((nav.deviceMemory ?? 8) <= 4 || (nav.hardwareConcurrency ?? 8) <= 6 || /Android|iPhone|iPad/i.test(nav.userAgent));
+  const trees: WTree[] = (phone ? b.trees.slice(0, 3000) : b.trees).map(t => {
     const [x, y] = toView(t.x, t.y);
     const kind = t.kind === "conifer" ? "conifer" : "deciduous";
     // pull toward the nearest palette tree colour, so autumn stays autumn

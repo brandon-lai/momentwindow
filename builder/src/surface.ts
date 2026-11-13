@@ -192,6 +192,19 @@ export function placeTrees(canopy: Grid<Float32Array> | null, s2: Sentinel | nul
     }
     if (top) peaks.push({ i, j, v });
   }
+  // A big crown has several local peaks: keep the tallest, and suppress the
+  // rest within a radius that grows with the tree (4 m, or 0.3 x height).
+  peaks.sort((a, b) => b.v - a.v);
+  const taken = new Map<string, { i: number; j: number; v: number }[]>(), cell = Math.ceil(10 / res);
+  const kept: typeof peaks = [];
+  for (const p of peaks) {
+    const r = Math.max(4, p.v * 0.3) / res, ci = Math.floor(p.i / cell), cj = Math.floor(p.j / cell);
+    let clash = false;
+    for (let dj = -1; dj <= 1 && !clash; dj++) for (let di = -1; di <= 1 && !clash; di++) for (const q of taken.get(`${ci + di},${cj + dj}`) ?? []) if (Math.hypot(q.i - p.i, q.j - p.j) < Math.max(r, Math.max(4, q.v * 0.3) / res)) { clash = true; break; }
+    if (clash) continue;
+    kept.push(p); const k = `${ci},${cj}`; let l = taken.get(k); if (!l) { l = []; taken.set(k, l); } l.push(p);
+  }
+  peaks.length = 0; peaks.push(...kept);
   const leafOff = (opts.lat >= 0 ? [11, 12, 1, 2, 3] : [5, 6, 7, 8, 9]).includes(opts.month);
   const trees: Tree[] = [];
   for (const p of peaks) {
@@ -223,9 +236,27 @@ export function placeTrees(canopy: Grid<Float32Array> | null, s2: Sentinel | nul
     const conifer = elev > 1100 || Math.abs(opts.lat) > 58 || (slim && p.v > 12) || (leafOff && leafy && colour[1] < 80);
     trees.push({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, h: Math.round(p.v * 10) / 10, r: Math.round(r * 10) / 10, kind: conifer ? "conifer" : "broadleaf", colour: colour.map(Math.round) as RGB });
   }
-  // cap: visible window first, then tallest
-  trees.sort((a, b) => opts.priority(b.x, b.y) - opts.priority(a.x, a.y) || b.h - a.h);
-  return trees.slice(0, opts.cap);
+  // Cap: visible window first, then thin
+  // evenly. Trees go into 40 m cells and are taken round-robin, tallest
+  // first in each cell, so a village's street trees survive and only dense
+  // forest thins. Taking the tallest overall dropped every tree in
+  // Middlebury's centre in favour of the woods along Otter Creek. The order
+  // is the round-robin order, so any prefix is evenly thinned too: a phone
+  // draws the first 3,000 (the PRD's cap), a laptop all of them.
+  if (trees.length <= opts.cap) return trees;
+  const out: Tree[] = [];
+  for (const pri of [1, 0]) {
+    const cells = new Map<string, Tree[]>();
+    for (const t of trees) { if (opts.priority(t.x, t.y) !== pri) continue; const k = `${Math.floor(t.x / 40)},${Math.floor(t.y / 40)}`; let c = cells.get(k); if (!c) { c = []; cells.set(k, c); } c.push(t); }
+    const lists = [...cells.values()].map(c => c.sort((a, b) => b.h - a.h));
+    for (let round = 0; out.length < opts.cap; round++) {
+      let any = false;
+      for (const c of lists) { if (round < c.length) { out.push(c[round]); any = true; if (out.length >= opts.cap) break; } }
+      if (!any) break;
+    }
+    if (out.length >= opts.cap) break;
+  }
+  return out;
 }
 
 export function polysToRings(polys: Ring[][]): Ring[] { return polys.map(p => p[0]); }
