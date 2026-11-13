@@ -90,8 +90,10 @@ export async function fetchSentinel(L: Local, size: number, res: number, refDate
   if (!items.length) return null;
   // Prefer the last 30 days, then fall back to the full 60: the season should
   // be the current one.
-  const recent = (it: StacItem) => new Date(it.properties.datetime).getTime() > refDate.getTime() - 30 * 864e5;
-  items.sort((a, b) => (Number(recent(b)) - Number(recent(a))) || a.properties["eo:cloud_cover"] - b.properties["eo:cloud_cover"]);
+  // The colour should be this month's: the newest fairly clear scene first
+  // (under 25% cloud, last 30 days), then the clearest of the rest.
+  const recent = (it: StacItem) => new Date(it.properties.datetime).getTime() > refDate.getTime() - 30 * 864e5 && it.properties["eo:cloud_cover"] < 25;
+  items.sort((a, b) => (Number(recent(b)) - Number(recent(a))) || (recent(a) ? Date.parse(b.properties.datetime) - Date.parse(a.properties.datetime) : a.properties["eo:cloud_cover"] - b.properties["eo:cloud_cover"]));
   const N = Math.ceil(size / res), cnt = N * N;
   const R = new Uint8Array(cnt), G = new Uint8Array(cnt), B = new Uint8Array(cnt), clear = new Uint8Array(cnt), snow = new Uint8Array(cnt), bare = new Uint8Array(cnt);
   const used: string[] = [];
@@ -118,7 +120,15 @@ export async function fetchSentinel(L: Local, size: number, res: number, refDate
       const c = sc[k];
       // scene classes: 0 nodata, 1 saturated, 3 cloud shadow, 8/9 cloud, 10 cirrus
       if (c === 0 || c === 1 || c === 3 || c === 8 || c === 9 || c === 10 || (r8[k] === 0 && g8[k] === 0 && b8[k] === 0)) { missing++; continue; }
-      R[k] = r8[k]; G[k] = g8[k]; B[k] = b8[k]; clear[k] = 1; snow[k] = c === 11 ? 1 : 0; bare[k] = c === 5 ? 1 : 0;
+      R[k] = r8[k]; G[k] = g8[k]; B[k] = b8[k]; clear[k] = 1; bare[k] = c === 5 ? 1 : 0;
+      // Snow in terrain shadow: in winter the scene classifier calls a
+      // shaded valley "dark area" (class 2), 70% of Grindelwald in January.
+      // Shaded snow stays blue-grey and neutral; shaded grass and forest
+      // stay green and dark. Snow lit only by blue sky is bright and
+      // blue-cyan (mean 140-220 over Grindelwald); shaded grass is never
+      // that bright.
+      const r0 = r8[k], g0 = g8[k], b0 = b8[k], mean = (r0 + g0 + b0) / 3;
+      snow[k] = c === 11 || (c === 2 && b0 >= r0 && b0 >= g0 - 10 && mean > 70) ? 1 : 0;
     }
     if (missing / cnt < 0.03) break;
   }

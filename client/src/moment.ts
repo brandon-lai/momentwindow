@@ -43,7 +43,9 @@ export function makeMoment(utc: number, lat: number, lon: number, w: Weather | n
   else if (cloud < 30 && sun.alt > 45 && (w?.temp ?? 15) > 22) key = "bright";
   else if (cloud < 30) key = "clear";
   else if (snowOnGround) key = "snow";
-  const phrase = describe({ sun, rain, drizzle, snowing, fog, cloud, w, snowOnGround });
+  // an override describes itself, not today's real weather
+  const wd = ov && w ? { ...w, recent: 0, precip: rain || drizzle ? 1 : 0, rain: rain ? 1 : 0, snowfall: snowing ? 1 : 0, cloud } : w;
+  const phrase = describe({ sun, rain, drizzle, snowing, fog, cloud, w: wd, snowOnGround });
   return { utc, lat, lon, tz: w?.tz ?? "UTC", key, sun, weather: w, rain, drizzle, snowing, fog, partly, snowOnGround, phrase };
 }
 

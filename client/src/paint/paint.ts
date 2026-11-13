@@ -331,7 +331,9 @@ function paintSky(sc: World, cam: Cam, g: G2, yFar: number) {
       pts.sort((p, q) => p[0] - q[0]);
       if (pts.length > 10 && pts.some(p => p[1] < yFar - 6)) {
         ridgeDrawn = true;
-        f.fillStyle = pat(f, mix(col, pal.tree, d0 > 1000 ? 0.06 : 0.18)); jiggle(f.fillStyle as CanvasPattern); f.globalAlpha = a;
+        // ridges above the snowline (or all of them, under snow) go pale
+        const snowy = pts.filter(p => p[2] > snowline).length / pts.length;
+        f.fillStyle = pat(f, mix(mix(col, pal.tree, d0 > 1000 ? 0.06 : 0.18), [242, 245, 252], snowy * 0.55)); jiggle(f.fillStyle as CanvasPattern); f.globalAlpha = a;
         f.beginPath(); f.moveTo(-10, yFar + 40); f.lineTo(-10, pts[0][1]);
         for (const p of pts) f.lineTo(p[0], p[1] + gauss() * 0.4);
         f.lineTo(CW + 10, pts[pts.length - 1][1]); f.lineTo(CW + 10, yFar + 40); f.closePath(); f.fill();
