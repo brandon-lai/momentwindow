@@ -37,6 +37,9 @@ const chrome = spawn(
     // HEADFUL=1 opens a real window with the real GPU: the only way to time
     // WebGL painting as a laptop does (headless means SwiftShader, on the CPU).
     ...(process.env.HEADFUL ? ["--window-position=40,40"] : ["--headless=new"]),
+    // a window Chrome thinks is hidden gets its animation frames throttled,
+    // which turns a two-second reveal into twenty
+    "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling",
     /*
      * Headless Chrome has no GPU, and --disable-gpu turns WebGL off entirely:
      * three.js throws "Error creating WebGL context" and the page never
@@ -78,6 +81,9 @@ function done(code) {
   process.exit(code);
 }
 
+// a probe that never answers is worse than one that fails
+setTimeout(() => { console.error("probe timed out"); done(3); }, Number(process.env.PROBE_TIMEOUT_MS ?? 90000));
+
 let target;
 for (let i = 0; i < 60; i++) {
   try {
@@ -99,6 +105,11 @@ let id = 0;
 const pending = new Map();
 ws.onmessage = (e) => {
   const msg = JSON.parse(e.data);
+  // throttle Web Workers too: CPU throttling is per target
+  if (msg.method === "Target.attachedToTarget" && process.env.THROTTLE) {
+    ws.send(JSON.stringify({ id: 1e6 + Math.floor(Math.random() * 1e6), sessionId: msg.params.sessionId, method: "Emulation.setCPUThrottlingRate", params: { rate: Number(process.env.THROTTLE) } }));
+    ws.send(JSON.stringify({ id: 2e6 + Math.floor(Math.random() * 1e6), sessionId: msg.params.sessionId, method: "Runtime.runIfWaitingForDebugger" }));
+  }
   if (msg.id && pending.has(msg.id)) {
     pending.get(msg.id)(msg);
     pending.delete(msg.id);
@@ -120,6 +131,11 @@ await send("Emulation.setDeviceMetricsOverride", {
   deviceScaleFactor: Number(process.env.DPR ?? 1),
   mobile: Number(width) < 700,
 });
+// THROTTLE=4 slows the CPU fourfold: a stand-in for a mid-range phone
+if (process.env.THROTTLE) {
+  await send("Emulation.setCPUThrottlingRate", { rate: Number(process.env.THROTTLE) });
+  await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+}
 await send("Page.navigate", { url });
 await sleep(Number(process.env.SETTLE_MS ?? 4000));
 

@@ -84,7 +84,7 @@ export async function fetchSentinel(L: Local, size: number, res: number, refDate
     collections: ["sentinel-2-l2a"], bbox: [w, s, e, n], datetime: `${start.toISOString()}/${end.toISOString()}`, limit: 8,
     query: { "eo:cloud_cover": { lt: 60 } }, sortby: [{ field: "properties.eo:cloud_cover", direction: "asc" }],
   };
-  const r = await fetch("https://earth-search.aws.element84.com/v1/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const r = await fetch("https://earth-search.aws.element84.com/v1/search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(12000) });
   if (!r.ok) throw new Error(`earth-search ${r.status}`);
   const items = ((await r.json()) as { features: StacItem[] }).features ?? [];
   if (!items.length) return null;

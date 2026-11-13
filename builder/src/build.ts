@@ -27,6 +27,8 @@ const ROAD_KIND: Record<string, string> = { motorway: "avenue", trunk: "avenue",
 export async function buildScene(cell: string, opts: BuildOpts = {}): Promise<SceneBundle> {
   const t0 = Date.now(), sources: Record<string, number> = {}, notes: string[] = [];
   const timed = async <T>(name: string, p: Promise<T>): Promise<T> => { const s = Date.now(); try { return await p; } finally { sources[name] = Date.now() - s; } };
+  // imagery is best-effort: a slow service costs that layer, never the build
+  const capped = <T>(name: string, p: Promise<T>, ms: number): Promise<T | null> => Promise.race([p, new Promise<null>(r => setTimeout(() => { notes.push(`${name} gave up after ${ms / 1000} s`); r(null); }, ms))]);
   if (!isValidCell(cell) || getResolution(cell) !== 8) throw new CellError("A scene is built per H3 cell at resolution 8.");
   const date = opts.date ?? new Date();
 
@@ -116,10 +118,10 @@ export async function buildScene(cell: string, opts: BuildOpts = {}): Promise<Sc
   const farP = timed("terrain.far", fetchElevation(bboxOf(farL, 52000), 10));
   const placeP = timed("photon", reverseGeocode(lat0, lon0).catch(() => null));
   const imgRes = 10;
-  const wcP = timed("worldcover", fetchWorldCover(L, S, imgRes).catch(e => { notes.push(`worldcover: ${e.message}`); return null; }));
-  const s2P = timed("sentinel2", fetchSentinel(L, S, imgRes, date).catch(e => { notes.push(`sentinel-2: ${e.message}`); return null; }));
+  const wcP = timed("worldcover", capped("worldcover", fetchWorldCover(L, S, imgRes).catch(e => { notes.push(`worldcover: ${e.message}`); return null; }), 25000));
+  const s2P = timed("sentinel2", capped("sentinel-2", fetchSentinel(L, S, imgRes, date).catch(e => { notes.push(`sentinel-2: ${e.message}`); return null; }), 30000));
   const canRes = kind === "dense" ? 2 : kind === "suburb" ? 2 : 3;
-  const canP = timed("canopy", fetchCanopy(L, S, canRes).catch(e => { notes.push(`canopy: ${e.message}`); return null; }));
+  const canP = timed("canopy", capped("canopy", fetchCanopy(L, S, canRes).catch(e => { notes.push(`canopy: ${e.message}`); return null; }), 25000));
 
   const [osm, elev] = await Promise.all([osmP, elevP]);
   const W = waterGrid(osm, S, 4);

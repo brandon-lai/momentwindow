@@ -294,9 +294,10 @@ function startLive(world: World, meta: PaintMeta, painting: HTMLCanvasElement, m
   if (!loopRunning) { loopRunning = true; requestAnimationFrame(loop); }
 }
 
-let loopRunning = false, last = performance.now(), slow = 0;
+let loopRunning = false, last = performance.now(), slow = 0, fpsN = 0, fpsT = performance.now();
 function loop(t: number) {
   const dt = Math.min(0.1, (t - last) / 1000 || 0.016); last = t;
+  fpsN++; if (t - fpsT > 2000) { (state as any).fps = Math.round(fpsN * 1000 / (t - fpsT)); fpsN = 0; fpsT = t; }
   if (state.live && state.world && state.life && state.view && !document.hidden) {
     const world = state.world, life = state.life, v = state.view, sim = state.sim!;
     if (!reduceMotion) {

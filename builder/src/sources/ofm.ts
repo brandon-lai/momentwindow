@@ -38,7 +38,7 @@ async function getTile(z: number, x: number, y: number): Promise<ArrayBuffer | n
   if (!cache.has(key)) {
     cache.set(key, (async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
-        const r = await fetch(tpl.replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y)), { headers: { "user-agent": UA } }).catch(() => null);
+        const r = await fetch(tpl.replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y)), { headers: { "user-agent": UA }, signal: AbortSignal.timeout(12000) }).catch(() => null);
         if (r && r.status === 404) return null;
         if (r && r.ok) return r.arrayBuffer();
         await new Promise(res => setTimeout(res, 300 * (attempt + 1)));

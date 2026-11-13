@@ -9,7 +9,8 @@ async function tile(z: number, x: number, y: number): Promise<Float32Array | nul
   const key = `${z}/${x}/${y}`;
   if (!cache.has(key)) {
     cache.set(key, (async () => {
-      const r = await fetch(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`);
+      const r = await fetch(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
+      if (!r) return null;
       if (!r.ok) return null;
       const png = PNG.sync.read(Buffer.from(await r.arrayBuffer()));
       const out = new Float32Array(256 * 256);
