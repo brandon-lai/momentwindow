@@ -4,13 +4,15 @@
 import { cellToBoundary, cellToLatLng, getResolution, isValidCell } from "h3-js";
 import { BUNDLE_VERSION, KIND, LANDMARK_CLASSES, type Building, type Cover, type Heading, type Pt, type Rail, type Ring, type Road, type SceneBundle, type SceneKind } from "../../shared/bundle.ts";
 import { bboxOf, localFrame, type Local } from "../../shared/geo.ts";
-import { absArea, area, centroid, clipLine, clipRing, grid8, inRing, len, rasterise, round1, roundPts, simplify } from "./geom.ts";
+import { absArea, area, centroid, clipLine, clipRing, distLine, grid8, inRing, len, rasterise, round1, roundPts, simplify } from "./geom.ts";
 import { forward, nameNear, pickFeature, waterGrid } from "./snap.ts";
 import { fetchOSM, type OsmData } from "./sources/ofm.ts";
 import { fetchElevation, type Elevation } from "./sources/terrain.ts";
 import { fetchCanopy, fetchSentinel, fetchWorldCover } from "./sources/rasters.ts";
 import { reverseGeocode } from "./sources/photon.ts";
 import { buildCovers, placeTrees, sampleColour } from "./surface.ts";
+import { landmarksNear, type WikiLandmark } from "./sources/wiki.ts";
+import { frameLandmark, landmarkColour, matchLandmarks, theName as lmName } from "./landmarks.ts";
 
 export class OceanError extends Error { constructor() { super("This cell is open ocean: there is no land to paint."); } }
 export class CellError extends Error {}
@@ -37,6 +39,8 @@ export async function buildScene(cell: string, opts: BuildOpts = {}): Promise<Sc
   const PS = 2400; // probe square: the cell plus room to judge what a camera would see
   const P = localFrame(clat, clon, PS);
   const probeBox = bboxOf(P, PS);
+  // famous things nearby (best effort: a slow wiki costs the framing, not the build)
+  const wikiP: Promise<WikiLandmark[]> = timed("wiki", capped("wiki", landmarksNear(clat, clon, 1800).catch(e => { notes.push(`wiki: ${e.message}`); return []; }), 9000).then(v => v ?? []));
   const [osmProbe, reliefProbe] = await Promise.all([
     timed("probe.osm", fetchOSM(P, probeBox, 14)),
     timed("probe.terrain", fetchElevation(bboxOf(P, PS, 1300), 11)),
@@ -69,7 +73,7 @@ export async function buildScene(cell: string, opts: BuildOpts = {}): Promise<Sc
   const relief = hi - lo;
   const kind: SceneKind = relief > 450 && builtFrac < 0.12 ? "mountain" : builtFrac > 0.14 && cityLike ? "dense" : builtFrac > 0.03 || count > 120 ? "suburb" : "country";
   notes.push(`kind ${kind}: ${(builtFrac * 100).toFixed(1)}% built, ${count} buildings within 800 m (median ${Math.round(medianFootprint)} m2), ${Math.round(relief)} m relief`);
-  const K = KIND[kind];
+  let K = { ...KIND[kind] };
 
   // ---- snap ----
   const snap = pickFeature(osmProbe, cellRing, PS);
@@ -88,9 +92,33 @@ export async function buildScene(cell: string, opts: BuildOpts = {}): Promise<Sc
     }
     notes.push(`mountain heading ${snap.heading} (max slope to skyline ${best.toFixed(2)})`);
   }
+  // A famous landmark nearby takes the frame: the visitor still sees their
+  // own neighbourhood (it is within reach of their cell), and it is the one
+  // thing in it everyone recognises.
+  const wiki = await wikiP;
+  const probeMatched = matchLandmarks(wiki, osmProbe, P);
+  const framing = frameLandmark(probeMatched, PS / 2, PS / 2, K.d, K.w, wg.at, kind === "dense" ? 1100 : 1500);
+  let depthFrac = 0.3;
+  if (framing) {
+    snap.kind = "landmark"; snap.x = framing.x; snap.y = framing.y; snap.heading = framing.heading; snap.name = framing.primary.w.name; depthFrac = framing.depth;
+    notes.push(framing.notes);
+    // a landmark is seen at city scale (a statue on an island in a 2.9 km
+    // countryside window was a speck); a long bridge gets a window it fits in
+    const span = framing.primary.line ? Math.max(framing.primary.w.length ?? 0, len(framing.primary.line)) : 0;
+    if (span > 900) { const w = Math.min(3400, span * 1.25); K = { square: Math.max(2000, Math.ceil(w * 1.5)), w, d: w * 0.664, pitch: 34 }; }
+    else {
+      // close enough to read it: about six times the landmark's size (its
+      // height, or its footprint, or its span), between 0.7 and 1.4 km wide
+      let size = Math.max(span * 0.7, framing.primary.w.height ?? 0);
+      if (framing.primary.base) { const xs = framing.primary.base.map(p => p[0]), ys = framing.primary.base.map(p => p[1]); size = Math.max(size, Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))); }
+      const w = Math.max(700, Math.min(1400, size * 6));
+      K = { square: 2000, w, d: w * 0.664, pitch: K.pitch };
+    }
+    notes.push(`landmark window ${Math.round(K.w)} m`);
+  }
   const fwd = forward(snap.heading);
-  // the feature sits 30% of the way into the window's depth
-  const wcx = snap.x + fwd[0] * K.d * 0.2, wcy = snap.y + fwd[1] * K.d * 0.2;
+  // the feature sits 30% of the way into the window's depth (38-50% for a landmark)
+  const wcx = snap.x + fwd[0] * K.d * (0.5 - depthFrac), wcy = snap.y + fwd[1] * K.d * (0.5 - depthFrac);
   const [lat0, lon0] = P.toLatLon(wcx, wcy);
   const S = K.square;
   const L = localFrame(lat0, lon0, S);
@@ -203,15 +231,24 @@ export async function buildScene(cell: string, opts: BuildOpts = {}): Promise<Sc
     // Orthodox churches, flat where the region builds flat
     let roof = "flat", roofH = 0, roofDir: number | undefined;
     const axis = longAxis(ring);
-    if (poi?.cls === "place_of_worship") { roof = domeChurch ? "dome" : "gable"; roofH = domeChurch ? Math.min(8, Math.sqrt(a) * 0.5) : Math.min(10, Math.sqrt(a) * 0.35); roofDir = axis; }
+    // the shape of a part says what its roof is: a raised round part is a
+    // dome (St Paul's), a raised slender one a spire (Notre-Dame's flèche);
+    // the house rules below only apply to buildings standing on the ground
+    let per = 0; for (let k = 0; k < ring.length; k++) per += Math.hypot(ring[(k + 1) % ring.length][0] - ring[k][0], ring[(k + 1) % ring.length][1] - ring[k][1]);
+    const roundness = (4 * Math.PI * a) / Math.max(1, per * per), raised = b.minH > 3;
+    if (raised && roundness > 0.82 && ring.length >= 8 && h - b.minH > 4) { roof = "dome"; roofH = Math.min(Math.sqrt(a / Math.PI) * 0.95, (h - b.minH) * 0.9); }
+    else if (raised && a < 220 && h - b.minH > 3 * Math.sqrt(a) && b.minH > 12) { roof = "pyramid"; roofH = (h - b.minH) * 0.6; }
+    else if (raised || roundness > 0.82) { /* flat */ }
+    else if (poi?.cls === "place_of_worship") { roof = domeChurch ? "dome" : "gable"; roofH = domeChurch ? Math.min(8, Math.sqrt(a) * 0.5) : Math.min(10, Math.sqrt(a) * 0.35); roofDir = axis; }
     else if (!flatRoofs && kind !== "dense" && a < 320 && h <= 14) { roof = "gable"; roofH = Math.min(5, Math.sqrt(a) * 0.32); roofDir = axis; }
     else if (pitchedTowns && a < 420 && h <= 26) {
       let longest = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length]; longest = Math.max(longest, Math.hypot(q[0] - p[0], q[1] - p[1])); }
       const width = a / Math.max(1, longest);
       if (width < 11) { roof = "gable"; roofH = Math.min(6, Math.max(3, width * 0.55)); roofDir = axis; }
     }
+    const wallTop = roof === "dome" || roof === "pyramid" ? h - roofH : h;
     buildings.push({
-      p: roundPts(ring), h: round1(h - Math.min(b.minH, h - 1)), minH: round1(Math.min(b.minH, h - 1)), roof, roofH: round1(roofH),
+      p: roundPts(ring), h: round1(wallTop - Math.min(b.minH, wallTop - 1)), minH: round1(Math.min(b.minH, wallTop - 1)), roof, roofH: round1(roofH),
       ...(roofDir !== undefined ? { roofDir: Math.round(roofDir * 100) / 100 } : {}),
       ...(b.colour ? { facadeColour: b.colour } : {}),
       ...(poi ? { name: poi.name, cls: poi.sub || poi.cls } : {}),
@@ -221,11 +258,11 @@ export async function buildScene(cell: string, opts: BuildOpts = {}): Promise<Sc
 
   const centre: [number, number] = [Math.round(lat0 * 1e5) / 1e5, Math.round(lon0 * 1e5) / 1e5];
   const place = await placeP;
-  const featureName = snap.name ?? nameNear(osm, fx, fy, 400);
+  const featureName = snap.kind === "landmark" && framing ? lmName(framing.primary.w.name) : snap.name ?? nameNear(osm, fx, fy, 400);
   const city = place?.city || place?.county || place?.state || "";
   const town = osm.places.filter(p => p.name && ["village", "town", "hamlet", "city", "suburb"].includes(p.cls)).sort((a, b) => Math.hypot(a.x - S / 2, a.y - S / 2) - Math.hypot(b.x - S / 2, b.y - S / 2))[0]?.name;
   const region = place?.state || place?.country || "";
-  const label = featureName ? `Around ${theName(featureName)}${city && city !== featureName ? `, ${city}` : ""}`
+  const label = featureName ? `Around ${featureName.startsWith("the ") ? featureName : theName(featureName)}${city && city !== featureName ? `, ${city}` : ""}`
     : place?.district && city ? `${place.district}, ${city}`
     : city ? `Around ${city}`
     : town ? `Near ${town}${region ? `, ${region}` : ""}`
@@ -269,6 +306,34 @@ export async function buildScene(cell: string, opts: BuildOpts = {}): Promise<Sc
     feature: { kind: snap.kind, ...(featureName ? { name: featureName } : {}), x: round1(fx), y: round1(fy) },
     built: { at: new Date().toISOString(), ms: 0, sources, month: date.toISOString().slice(0, 7), notes },
   };
+  // landmarks in the final frame: what they are, and which footprints are them
+  const xsW = win.map(p => p[0]), ysW = win.map(p => p[1]);
+  const nearWin = (x: number, y: number, m: number) => x > Math.min(...xsW) - m && x < Math.max(...xsW) + m && y > Math.min(...ysW) - m && y < Math.max(...ysW) + m;
+  bundle.landmarks = [];
+  for (const m of matchLandmarks(wiki, osm, L)) {
+    if (!nearWin(m.x, m.y, 250)) continue;
+    const colour = landmarkColour(m.w);
+    bundle.landmarks.push({
+      qid: m.w.qid, name: m.w.name, links: m.w.links, kind: m.kind, x: round1(m.x), y: round1(m.y),
+      ...(m.w.height ? { h: Math.round(m.w.height) } : {}), ...(colour ? { colour } : {}),
+      ...(m.base ? { base: roundPts(simplify(m.base, 0.4, true)) } : {}), ...(m.line ? { line: roundPts(simplify(m.line, 1)) } : {}),
+    });
+    // the footprints that are it; for a tower, every part within its spread
+    // (the Eiffel Tower's four pillars are separate parts on the map)
+    const towerR = m.kind === "lattice" || m.kind === "needle" ? Math.max(40, (m.w.height ?? 200) * 0.25) : 0;
+    if (m.base) for (const b of bundle.buildings) {
+      const c = centroid(b.p);
+      if (inRing(c[0], c[1], m.base) || inRing(m.x, m.y, b.p) || (towerR && Math.hypot(c[0] - m.x, c[1] - m.y) < towerR && b.h + b.minH <= (m.w.height ?? 999) + 5)) { b.lm = m.w.qid; b.name = m.w.name; }
+    }
+    // map boxes standing on a drawn bridge (its towers, mapped as buildings)
+    if (m.line) for (const b of bundle.buildings) { const c = centroid(b.p); if (distLine(c[0], c[1], m.line) < 30) { b.lm = m.w.qid; b.name = m.w.name; } }
+    // a tower's base is the spread of all its parts
+    if (towerR && m.base) {
+      const pts = bundle.buildings.filter(b => b.lm === m.w.qid).flatMap(b => b.p);
+      if (pts.length >= 3) bundle.landmarks[bundle.landmarks.length - 1].base = roundPts(hullOf(pts));
+    }
+  }
+  if (bundle.landmarks.length) notes.push(`landmarks: ${bundle.landmarks.map(l => `${l.name} (${l.kind})`).join(", ")}`);
   // spawn zones that need only the map
   for (const p of waterPolys) {
     const a = absArea(p[0]) - p.slice(1).reduce((s, h) => s + absArea(h), 0);
@@ -342,7 +407,7 @@ function trim(b: SceneBundle, win: Ring, kind: SceneKind) {
   const m = kind === "dense" ? 60 : 100;
   const x0 = Math.min(...xs) - m, x1 = Math.max(...xs) + m, y0 = Math.min(...ys) - m, y1 = Math.max(...ys) + m;
   const inR = (x: number, y: number, e = 0) => x >= x0 - e && x <= x1 + e && y >= y0 - e && y <= y1 + e;
-  b.buildings = b.buildings.filter(q => { const c = centroid(q.p); return inR(c[0], c[1], 60) || (q.h > 60 && inR(c[0], c[1], 400)); });
+  b.buildings = b.buildings.filter(q => { const c = centroid(q.p); return inR(c[0], c[1], 60) || (q.h > 60 && inR(c[0], c[1], 400)) || (!!q.lm && inR(c[0], c[1], 300)); });
   b.trees = b.trees.filter(t => inR(t.x, t.y, 10));
   const clipC = (r: Ring) => clipRing(r, x0, y0, x1, y1);
   b.covers = b.covers.map(c => ({ ...c, poly: roundPts(clipC(c.poly)) })).filter(c => c.poly.length >= 3 && absArea(c.poly) > 4);
@@ -354,6 +419,15 @@ function trim(b: SceneBundle, win: Ring, kind: SceneKind) {
   b.spawn.paths = b.spawn.paths.flatMap(clipL).slice(0, 400);
   b.spawn.parks = b.spawn.parks.map(clipC).filter(r => r.length >= 3).map(roundPts);
   b.spawn.pasture = b.spawn.pasture.map(clipC).filter(r => r.length >= 3).map(roundPts);
+}
+
+function hullOf(pts: Pt[]): Ring {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o: Pt, a: Pt, b: Pt) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: Pt[] = [], up: Pt[] = [];
+  for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
 }
 
 function longAxis(r: Ring): number {

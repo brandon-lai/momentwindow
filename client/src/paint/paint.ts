@@ -6,6 +6,13 @@
 import { CW, CH, M, PI, SC, base, blob, canvas, ccw, centroid, clamp, clipTo, colorize, cx, deform, dot3, fillPoly, finishPaper, gauss, granulate, hull, ident, inPoly, jiggle, lerp, mix, mul, pat, pointAt, polyArea, polyLen, range, reseed, rgb, rimOf, screen, smoothstep, softBlur, traceArr, tracePoly, wash, withVar, alphaGrid, offsetLine, type C3, type Cnv, type G2, type P2 } from "./util.ts";
 import type { World } from "./scene.ts";
 import type { GLR } from "./gl.ts";
+import { paintExtras, paintLandmark, REPLACES, type LmEnv } from "./landmarks.ts";
+
+// buildings whose footprint a landmark painter replaces (the Eiffel Tower's
+// map footprint is a 330 m solid block)
+export function replacedBy(sc: World): Set<string> {
+  return new Set(sc.landmarks.filter(l => REPLACES.has(l.kind)).map(l => l.qid));
+}
 
 export interface Cam { x: number; y: number; z: number; phi: number; F: number; cos: number; sin: number; near: number; far: number }
 export function project(cam: Cam, x: number, y: number, z: number): [number, number, number, number] {
@@ -30,8 +37,17 @@ export function makeCam(sc: World): Cam {
   for (let j = 0; j <= 24; j++) for (let i = 0; i <= 16; i++) { const x = i / 16 * sc.W, y = near + j / 24 * depth; samples.push([x, y, sc.H(x, y)]); }
   const build = (hc: number): Cam => ({ x: sc.W / 2, y: near - hc / Math.tan(aBot), z: hc + zBase, phi, F, cos: Math.cos(phi), sin: Math.sin(phi), near: 0, far: 0 });
   const topY = (cam: Cam) => { let m = Infinity; for (const [x, y, z] of samples) { const p = project(cam, x, y, z); if (p[3] > 0 && p[0] > -60 && p[0] < CW + 60) m = Math.min(m, p[1]); } return m; };
+  // landmark tops should fit under the top of the frame (within reason: the
+  // camera rises at most to twice what the terrain alone needs)
+  const tops = sc.landmarks.filter(l => l.h && l.x > -50 && l.x < sc.W + 50 && l.y > 0 && l.y < sc.D).map(l => [l.x, l.y, sc.H(l.x, l.y) + (l.h ?? 0)] as [number, number, number]);
+  const lmTop = (cam: Cam) => { let m = Infinity; for (const [x, y, z] of tops) { const p = project(cam, x, y, z); if (p[3] > 0) m = Math.min(m, p[1]); } return m; };
   let lo = 0.05 * sc.D, hi = 8 * sc.D;
   for (let k = 0; k < 36; k++) { const mid = (lo + hi) / 2; if (topY(build(mid)) < target) lo = mid; else hi = mid; }
+  if (tops.length && lmTop(build(hi)) < CH * 0.07) {
+    const terrainOnly = hi; let a = hi, b2 = hi * 2;
+    for (let k = 0; k < 30; k++) { const mid = (a + b2) / 2; if (lmTop(build(mid)) < CH * 0.07) a = mid; else b2 = mid; }
+    hi = Math.min(b2, terrainOnly * 2);
+  }
   const cam = build(hi);
   cam.near = project(cam, sc.W / 2, near, zBase)[3]; cam.far = project(cam, sc.W / 2, sc.D, sc.H(sc.W / 2, sc.D))[3];
   return cam;
@@ -153,7 +169,9 @@ export async function paintGround(sc: World, tick: () => Promise<void>): Promise
     const q = 4, sw = Math.ceil(gw / q), shh = Math.ceil(gh / q), qp = ppm / q;
     const sm = canvas(sw, shh), smg = cx(sm); smg.fillStyle = "#000"; smg.fillRect(0, 0, sw, shh); smg.globalCompositeOperation = "lighten";
     const sdx = S.dx * qp, sdy = -S.dy * qp;
+    const gone = replacedBy(sc);
     for (const b of sc.buildings.slice().sort((a, c) => a.h - c.h)) {
+      if (b.lm && gone.has(b.lm)) continue;
       const L = Math.min((b.h + b.roofH * 0.6) * S.perM, 260), steps = Math.max(2, Math.min(24, Math.ceil(L * qp / 2))), pts = b.p.map(p => [p[0] * qp, (sc.D - p[1]) * qp]);
       if (!pts.some(([x, y]) => x > -L * qp && x < sw + L * qp && y > -L * qp && y < shh + L * qp)) continue;
       for (let k = steps; k >= 0; k--) {
@@ -393,9 +411,20 @@ export function paintView(sc: World, cam: Cam, gd: GroundOut, glr: GLR | null, s
     return false;
   } : () => false;
 
-  type Obj = { b?: World["buildings"][number]; t?: World["trees"][number]; z?: number; d: number };
+  type Obj = { b?: World["buildings"][number]; t?: World["trees"][number]; lm?: World["landmarks"][number]; z?: number; d: number };
+  const gone = replacedBy(sc);
+  // the tallest part of each landmark building gets its extras (spire, dome, clock faces)
+  const tallest = new Map<string, World["buildings"][number]>();
+  for (const b of sc.buildings) if (b.lm && (!tallest.has(b.lm) || b.z0 + b.h > tallest.get(b.lm)!.z0 + tallest.get(b.lm)!.h)) tallest.set(b.lm, b);
   const objs: Obj[] = [];
-  for (const b of sc.buildings) { const p = project(cam, b.c[0], b.c[1], b.z0); if (p[0] < -200 || p[0] > CW + 200 || p[1] < -100 || p[1] > CH + 300 || p[3] <= 0) continue; objs.push({ b, d: p[3] }); }
+  for (const b of sc.buildings) { if (b.lm && gone.has(b.lm)) continue; const p = project(cam, b.c[0], b.c[1], b.z0); if (p[0] < -200 || p[0] > CW + 200 || p[1] < -100 || p[1] > CH + 300 || p[3] <= 0) continue; objs.push({ b, d: p[3] }); }
+  for (const lm of sc.landmarks) {
+    if (!["lattice", "needle", "obelisk", "suspension", "bascule", "arch", "bridge", "cablestayed", "shells", "ferris", "statue"].includes(lm.kind)) continue;
+    const [ax, ay] = lm.line ? lm.line[Math.floor(lm.line.length / 2)] : [lm.x, lm.y];
+    const p = project(cam, ax, ay, sc.H(ax, ay)); if (p[3] <= 0) continue;
+    // a statue stands on its pedestal, so it is drawn just after it
+    objs.push({ lm, d: lm.kind === "statue" ? p[3] - 1 : p[3] });
+  }
   for (const t of sc.trees) { const z = H(t.x, t.y), p = project(cam, t.x, t.y, z); if (p[0] < -40 || p[0] > CW + 40 || p[1] < -40 || p[1] > CH + 80 || p[3] <= 0) continue; objs.push({ t, z, d: p[3] }); }
   objs.sort((a, b) => b.d - a.d);
 
@@ -440,8 +469,24 @@ export function paintView(sc: World, cam: Cam, gd: GroundOut, glr: GLR | null, s
   const sunScreen = (() => { const s = sc.sunV; const v = [s[0], -(s[1] * cam.sin + s[2] * cam.cos)]; const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; })();
   let nWin = 0;
   const night = pal.night;
+  const lmEnv: LmEnv = {
+    L: LA, cam, sc, sun: [sunScreen[0], sunScreen[1]], hazeAt, fadeAt,
+    face: (pts, col, a = 1, washA = 0.28) => { L = LA; O = LB; face(pts, col, a, washA); },
+    edge: (pts, col, a) => { LA.strokeStyle = rgb(col, a); LA.lineWidth = 0.8; traceArr(LA, pts); LA.stroke(); },
+    line: (pts, col, a, w) => {
+      LA.strokeStyle = rgb(col, a); LA.lineWidth = w; LA.lineCap = "round"; LA.lineJoin = "round"; LA.beginPath(); pts.forEach((p, i) => i ? LA.lineTo(p[0], p[1]) : LA.moveTo(p[0], p[1])); LA.stroke();
+      if (a > 0.5) { LB.save(); LB.globalCompositeOperation = "destination-out"; LB.strokeStyle = "#000"; LB.lineWidth = w; LB.beginPath(); pts.forEach((p, i) => i ? LB.lineTo(p[0], p[1]) : LB.moveTo(p[0], p[1])); LB.stroke(); LB.restore(); }
+    },
+    hit: (pts, label) => {
+      const hp = hull(pts); hits.push({ poly: hp, label, landmark: true });
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const q of hp) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }
+      const c = hp.reduce((s, q) => [s[0] + q[0] / hp.length, s[1] + q[1] / hp.length], [0, 0]), u = unproject(cam, c[0], Math.min(CH - 1, y1), 0), dz = u ? Math.hypot(u[0] - cam.x, u[1] - cam.y) * cam.cos : 1e9;
+      for (let zy = Math.max(0, Math.floor(y0 / 4)); zy <= Math.min(ZH - 1, Math.floor(y1 / 4)); zy++) for (let zx = Math.max(0, Math.floor(x0 / 4)); zx <= Math.min(ZW - 1, Math.floor(x1 / 4)); zx++) if (inPoly(zx * 4 + 2, zy * 4 + 2, hp)) { const k = zy * ZW + zx; if (dz < zbuf[k]) zbuf[k] = dz; }
+    },
+  };
   for (const o of objs) {
     const hz = hazeAt(o.d);
+    if (o.lm) { L = LA; O = LB; paintLandmark(lmEnv, o.lm); continue; }
     if (o.t) {
       L = LB; O = LA;
       const t = o.t, fade = fadeAt(t.x, t.y); if (fade < 0.05) continue;
@@ -550,6 +595,27 @@ export function paintView(sc: World, cam: Cam, gd: GroundOut, glr: GLR | null, s
       L.fillStyle = gg; L.globalAlpha = fade; L.beginPath(); L.ellipse(c[0], c[1], r, r * 0.95, 0, PI, 0); L.ellipse(c[0], c[1], r, r * cam.sin * 0.6, 0, 0, PI); L.fill(); L.globalAlpha = 1;
       erase(g => { g.beginPath(); g.arc(c[0], c[1], r, 0, PI * 2); g.fill(); });
       mg.beginPath(); mg.arc(c[0], c[1], r, 0, PI * 2); mg.fill();
+    }
+    // landmark extras on the tallest part: a spire or mast to the real
+    // height, clock faces, a dome
+    if (b.lm && tallest.get(b.lm) === b) {
+      const lm = sc.landmarks.find(l => l.qid === b.lm);
+      if (lm && lm.kind === "skyscraper") { L = LA; O = LB; paintExtras(lmEnv, lm, { x: b.c[0], y: b.c[1], ground: sc.H(b.c[0], b.c[1]), z: b.z0 - sc.H(b.c[0], b.c[1]) + b.h + b.roofH, ring: b.p }); }
+      if (lm && lm.kind === "clock") {
+        // the clock sits about 58% of the way up: faces go on the part that spans that height
+        const G = sc.H(b.c[0], b.c[1]), zc = (lm.h ?? (b.z0 - G + b.h)) * 0.58;
+        const host = sc.buildings.filter(q => q.lm === lm.qid && q.z0 - G <= zc && q.z0 - G + q.h >= zc).sort((x, y) => Math.abs(polyArea(x.p)) - Math.abs(polyArea(y.p)))[0] ?? b;
+        L = LA; O = LB; paintExtras(lmEnv, lm, { x: b.c[0], y: b.c[1], ground: G, z: b.z0 - G + b.h + b.roofH, ring: host.p, clockZ: G + zc });
+      }
+      if (lm && lm.kind === "dome" && !sc.buildings.some(q => q.lm === lm.qid && q.roof === "dome")) {
+        // a church's dome or spire stands at its crossing, near the middle of
+        // its footprint, on whatever part is there
+        const G = sc.H(lm.x, lm.y), under = sc.buildings.filter(q => q.lm === lm.qid && inPoly(lm.x, lm.y, q.p));
+        const baseTop = under.length ? Math.max(...under.map(q => q.z0 - G + q.h + q.roofH)) : b.z0 - G + b.h;
+        const span = lm.base ? Math.sqrt(Math.abs(polyArea(lm.base))) : 40, r = Math.max(8, Math.min(span * 0.2, 22));
+        const ring: P2[] = Array.from({ length: 16 }, (_, k) => [lm.x + Math.cos(k / 16 * PI * 2) * r, lm.y + Math.sin(k / 16 * PI * 2) * r] as P2);
+        L = LA; O = LB; paintExtras(lmEnv, lm, { x: lm.x, y: lm.y, ground: G, z: baseTop, ring, aspectOf: lm.base });
+      }
     }
     // a screen hull for taps, and the coarse depth buffer
     const pts = bse.concat(top).concat(ridge || []).map(p => [p[0], p[1]]);

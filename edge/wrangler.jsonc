@@ -11,7 +11,7 @@
   "kv_namespaces": [{ "binding": "SCENES", "id": "9a98f4011938411a998092944fd94ca3" }],
   "vars": {
     "BUILDER_URL": "https://momentwindow-builder.vercel.app/api/scene",
-    "BUNDLE_VERSION": "1"
+    "BUNDLE_VERSION": "2"
   },
   // Only the app's own log lines are kept (timings with a country and a
   // resolution-5 cell). Cloudflare's per-request invocation logs carry the

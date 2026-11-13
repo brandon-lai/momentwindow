@@ -3,7 +3,7 @@
 // square's south-west corner. This is the PRD's contract with the extensions
 // listed at the bottom (each one says why it exists).
 
-export const BUNDLE_VERSION = 1;
+export const BUNDLE_VERSION = 2; // 2: landmarks
 
 export type Pt = [number, number];
 export type Ring = Pt[];
@@ -16,11 +16,21 @@ export interface Cover { type: string; poly: Ring; colour: RGB | null; angle?: n
 export interface Building {
   p: Ring; h: number; minH: number; roof: string; roofH: number; roofDir?: number;
   roofColour?: string; facadeColour?: string; name?: string; cls?: string;
+  lm?: string; // Wikidata id of the landmark this footprint belongs to (extension)
+}
+
+// A famous landmark in or near the window (extension): what Wikidata says it
+// is, so the painter can give it its real shape.
+export interface Landmark {
+  qid: string; name: string; links: number;
+  kind: string; // lattice, needle, suspension, cablestayed, arch, bascule, bridge, statue, shells, clock, obelisk, ferris, skyscraper, dome, building
+  x: number; y: number; h?: number; colour?: RGB;
+  base?: Ring; line?: Pt[];
 }
 export interface Tree { x: number; y: number; h: number; r: number; kind: "broadleaf" | "conifer"; colour: RGB }
 
 export interface SceneBundle {
-  version: 1;
+  version: number;
   cell: string;
   centre: [number, number]; // window centre [lat, lon], a public place, never a visitor's point
   size: [number, number]; // scene square [w, d] in metres
@@ -53,7 +63,8 @@ export interface SceneBundle {
   // Terrain beyond the far edge, for real ridges against the sky: heights
   // along rays fanning out past the window, metres above `terrain.base`.
   beyond: { az: number; dist: number[]; h: number[] }[];
-  feature: { kind: "waterfront" | "park" | "landmark" | "street" | "centre"; name?: string; x: number; y: number };
+  feature: { kind: "waterfront" | "park" | "landmark" | "street" | "centre"; name?: string; x: number; y: number; depth?: number };
+  landmarks?: Landmark[];
   built: { at: string; ms: number; sources: Record<string, number>; month: string; notes: string[] };
 }
 

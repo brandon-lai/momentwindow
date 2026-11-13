@@ -25,6 +25,26 @@ Built from `Moment-Live-Window-PRD.pdf` (2026-11-12). The painter is a port of t
 | Postcards | "Send this moment" freezes time, weather, sun and life (seed + step count), takes a note (≤ 140 characters) and a 1200 × 630 share image. `/p/:id` replays the same frozen moment and its life on any device, with Open Graph tags. |
 | Credits | "Map data" lists every source used in that scene, plus the location policy. |
 
+## Landmarks: making big cities recognisable
+
+A painting of a city is only as recognisable as its landmarks, so the builder finds them and the painter gives them their real shape.
+
+- **What is famous nearby.** Wikipedia's geosearch lists up to 500 articles near the cell, ranked by article length. Wikidata then gives each one its fame (how many language editions cover it), its type, its height, its length (for bridges), and its official colour and material. The two calls take about a second. Overpass was tried first: it timed out or failed on three public servers.
+- **Only real structures.** A landmark counts only if the map has a body for it: a footprint under its point, or a bridge deck. Things with a population, a headquarters, or a date and participants are dropped (wards, companies, events). Typed structures (towers, statues, churches) may sit up to 60 m off their footprint.
+- **Framing.** The most famous structure within about 1.1 km (1.5 km outside dense centres) takes the frame. Bridges, towers, statues and shells win close calls. It sits centred, 38% into the depth (50% for a bridge). The heading is chosen to fit the most fame in view, put water in front, and show a bridge side-on. The window is sized to the landmark: about six times its size, from 0.7 to 1.4 km wide; a long bridge gets a window it fits. The label names it: "Around the Eiffel Tower, Paris".
+- **Shapes from types.** Each Wikidata type has its own painter, with real height, colour and material:
+  - lattice towers (the Eiffel Tower's curved legs and platforms; Tokyo Tower's orange and white bands);
+  - needle towers (shaft, pod, antenna);
+  - suspension bridges (towers, catenary cables, hangers), bascule bridges (gothic towers, high walkways), steel arches with granite pylons, stone arches, cable-stayed bridges;
+  - statues on their pedestals, opera-house shells (vaults along the long axis), clock faces at the clock's height, domes and gothic spires at a church's crossing, obelisks, Ferris wheels, skyscraper masts up to the real height.
+  - Raised round map parts become domes (St Paul's) and slender raised parts become spires.
+- **What cities are built of.** Regional material palettes replace the random pastel facades: Paris limestone with zinc roofs, Rome ochre with terracotta, London brick and Portland stone, Amsterdam brick, American brick and limestone with glass towers, East Asian pale concrete, desert sand. Sentinel-2 still colours the big roofs.
+
+Twelve landmarks are the regression set for this (`scripts/landmarks-regress.ts`):
+- **Read at a glance:** the Eiffel Tower, the Golden Gate Bridge, the Sydney Opera House (the Harbour Bridge arch shows behind it), Tokyo Tower, the Colosseum, the Statue of Liberty, the CN Tower, the Empire State Building, St Paul's Cathedral and Tower Bridge.
+- **Readable but weaker:** Big Ben (clock face and tower by the bridge, small at this scale).
+- **Weak:** Notre-Dame, whose nave and spire do not come through yet.
+
 ## Acceptance criteria, as measured
 
 **1. Real data**

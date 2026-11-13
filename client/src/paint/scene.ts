@@ -7,7 +7,8 @@ import { palette, type Pal } from "./palette.ts";
 import { ccw, centroid, hex, minRect, mix, mul, mulberry32, norm3, polyArea, pull, type C3, type P2 } from "./util.ts";
 import type { Moment } from "../moment.ts";
 
-export interface WBuilding { p: P2[]; h: number; z0: number; roof: string; roofH: number; tone: C3; roofTone: C3; label: string; landmark: boolean; c: P2; i: number; house: boolean }
+export interface WBuilding { p: P2[]; h: number; z0: number; roof: string; roofH: number; tone: C3; roofTone: C3; label: string; landmark: boolean; c: P2; i: number; house: boolean; lm?: string }
+export interface WLandmark { qid: string; name: string; kind: string; links: number; x: number; y: number; h?: number; colour?: C3; base?: P2[]; line?: P2[]; bands?: boolean; standOn?: number }
 export interface WTree { x: number; y: number; r: number; h: number; kind: "deciduous" | "conifer"; tone: C3 }
 export interface WCover { type: string; poly: P2[]; col: C3; angle?: number; crop?: string }
 export interface WRoad { pts: P2[]; w: number; kind: string; lit?: boolean; bridge?: boolean }
@@ -16,7 +17,7 @@ export interface World {
   pal: Pal; seed: number; moment: Moment;
   H: (x: number, y: number) => number; relief: number; baseShift: number; absBase: number; // metres from the bundle's terrain base to the window's lowest point
   water: P2[][][]; land: P2[][]; roads: WRoad[]; buildings: WBuilding[]; trees: WTree[]; covers: WCover[];
-  ferries: P2[][]; canals: P2[][]; cables: P2[][]; openWater: P2[][]; parks: P2[][]; paths: P2[][]; pasture: P2[][];
+  ferries: P2[][]; canals: P2[][]; cables: P2[][]; landmarks: WLandmark[]; openWater: P2[][]; parks: P2[][]; paths: P2[][]; pasture: P2[][];
   sunV: C3; reliefV: C3; reliefDif: number; shW: { dx: number; dy: number; perM: number };
   camPitch: number; farScreen: number; farFade: number; rock: boolean; signs: boolean; distant: string | null;
   beyond: { az: number; dist: number[]; h: number[] }[];
@@ -25,6 +26,36 @@ export interface World {
 }
 
 const ASIAN = new Set(["JP", "CN", "HK", "TW", "KR", "TH", "VN", "SG", "MY", "PH", "MO"]);
+
+// What cities are actually built of, by region: the random pastel facades
+// made Paris look like Midtown. Daylight colours; the palette darkens them
+// for dusk and night.
+interface Region { walls: C3[]; tall: C3[]; roofFlat: C3[]; roofPitched: C3[] }
+const R_ = (walls: C3[], tall: C3[], roofFlat: C3[], roofPitched: C3[]): Region => ({ walls, tall, roofFlat, roofPitched });
+const REGIONS: Record<string, Region> = {
+  limestone: R_([[232, 222, 200], [224, 214, 190], [238, 230, 212], [216, 206, 186]], [[176, 186, 198], [200, 204, 206]], [[156, 162, 170], [168, 170, 172]], [[110, 122, 136], [98, 108, 120], [124, 132, 142]]),
+  mediterranean: R_([[224, 184, 136], [214, 162, 114], [232, 202, 154], [204, 146, 104], [238, 216, 178], [226, 196, 160]], [[196, 196, 190], [176, 184, 194]], [[200, 180, 150], [190, 170, 140]], [[186, 106, 74], [172, 98, 70], [198, 122, 86]]),
+  british: R_([[168, 98, 80], [152, 88, 72], [186, 120, 94], [228, 222, 206], [214, 206, 188]], [[170, 182, 196], [196, 200, 204], [150, 166, 186]], [[150, 150, 154], [166, 164, 162]], [[96, 100, 108], [112, 114, 120]]),
+  northern: R_([[152, 80, 64], [124, 66, 54], [178, 106, 80], [198, 170, 142], [226, 214, 196], [94, 92, 90]], [[176, 186, 196], [200, 202, 204]], [[150, 150, 152]], [[96, 88, 86], [118, 82, 70], [80, 78, 82]]),
+  american: R_([[178, 106, 84], [162, 94, 76], [216, 206, 188], [200, 192, 178], [152, 122, 102], [226, 220, 210]], [[152, 172, 192], [172, 182, 192], [198, 198, 194], [124, 144, 170]], [[152, 152, 154], [172, 170, 166]], [[112, 110, 112], [98, 102, 108], [134, 116, 102]]),
+  eastasia: R_([[224, 224, 222], [208, 210, 212], [232, 228, 220], [198, 200, 206], [216, 208, 198]], [[162, 178, 198], [188, 198, 208], [142, 162, 188]], [[160, 164, 168], [180, 182, 184]], [[120, 126, 134], [96, 104, 112], [150, 90, 70]]),
+  arid: R_([[228, 208, 172], [216, 194, 154], [238, 224, 198]], [[170, 186, 200], [206, 206, 200]], [[220, 204, 176]], [[200, 160, 120]]),
+};
+const REGION_OF: Record<string, string> = {
+  FR: "limestone", MC: "limestone", LU: "limestone",
+  IT: "mediterranean", ES: "mediterranean", PT: "mediterranean", HR: "mediterranean", MT: "mediterranean", SM: "mediterranean", VA: "mediterranean",
+  GB: "british", IE: "british",
+  NL: "northern", BE: "northern", DE: "northern", DK: "northern", PL: "northern", SE: "northern", NO: "northern", FI: "northern", CZ: "northern", AT: "northern", CH: "northern", EE: "northern", LV: "northern", LT: "northern",
+  US: "american", CA: "american", AU: "american", NZ: "american",
+  JP: "eastasia", KR: "eastasia", CN: "eastasia", HK: "eastasia", TW: "eastasia", SG: "eastasia", MO: "eastasia",
+  AE: "arid", SA: "arid", QA: "arid", EG: "arid", MA: "arid", JO: "arid", IL: "arid", IR: "arid", KW: "arid", OM: "arid", BH: "arid", TN: "arid", DZ: "arid", LY: "arid",
+};
+// the few icons whose colour is not in Wikidata but is the whole point
+const ICON: Record<string, { colour?: C3; bands?: boolean }> = {
+  Q183536: { bands: true }, // Tokyo Tower: orange and white
+  Q243: { colour: [128, 100, 76] }, // Eiffel Tower: its bronze-brown
+  Q9202: { colour: [110, 168, 146] }, // Statue of Liberty: copper green
+};
 const HEAD_AZ: Record<string, number> = { N: 0, E: 90, S: 180, W: 270 };
 
 export function buildWorld(b: SceneBundle, m: Moment, seed: number): World {
@@ -69,16 +100,36 @@ export function buildWorld(b: SceneBundle, m: Moment, seed: number): World {
     const total = q.h + q.minH;
     const facade = q.facadeColour ? hex(q.facadeColour) : null;
     let tone: C3 = total >= 120 ? pick(pal.glass) : total >= 35 ? pick(tr() < 0.25 ? pal.glass : pal.warm) : pick(tr() < 0.6 ? pal.pale : pal.warm);
-    if (facade) tone = pull(facade, tone, 0.72);
+    const region = REGIONS[REGION_OF[b.place.cc] ?? ""];
+    if (region) {
+      // the material by day, mostly the palette's light after dark
+      const day = total >= 60 ? pick(region.tall) : pick(region.walls);
+      tone = mix(day, tone, pal.night ? 0.7 : 0.18);
+    } else if (facade) tone = pull(facade, tone, 0.72);
     if (b.place.cc === "GR" || b.place.cc === "CY") tone = mix([250, 250, 246], tone, total > 12 ? 0.4 : 0.08); // whitewash
     const rc = q.roofColour ? hex(q.roofColour) : null;
     let roofTone: C3 = roof === "flat" ? mix(tone, pal.paper, 0.3) : mul(tone, 0.78);
+    if (region) roofTone = mix(roof === "flat" ? pick(region.roofFlat) : pick(region.roofPitched), roofTone, pal.night ? 0.7 : 0.15);
     if (roof === "dome") roofTone = b.place.cc === "GR" || b.place.cc === "CY" ? [64, 108, 184] : [160, 168, 176];
-    else if (rc) roofTone = pull(rc, roofTone, 0.55);
+    else if (rc) roofTone = pull(rc, roofTone, region ? 0.7 : 0.55);
     if (pal.snow && roof !== "flat" && roof !== "dome") roofTone = [244, 246, 250];
     const kindLabel = q.cls ? q.cls.replace(/_/g, " ") : roof === "gable" && area < 300 ? "House" : total >= 150 ? "Tower" : total >= 40 ? "High-rise" : total >= 12 ? "Building" : "Low building";
     const label = q.name ? `${q.name} · ${Math.round(total + roofH)} m` : `${cap(kindLabel)} · ${Math.round(total + roofH)} m`;
-    buildings.push({ p, h: q.h, z0: H(c[0], c[1]) + q.minH, roof, roofH: roof === "flat" ? 0 : roofH, tone, roofTone, label, landmark: !!q.name, c, i, house: roof === "gable" && area < 320 });
+    const lmInfo = q.lm ? b.landmarks?.find(l => l.qid === q.lm) : undefined;
+    // a long church's nave carries a steep roof (Notre-Dame, Westminster Abbey)
+    if (lmInfo?.kind === "dome" && roof === "flat" && q.minH < 3 && area > 600) {
+      const r = minRect(p), lng = Math.hypot(r[1][0] - r[0][0], r[1][1] - r[0][1]), wid = Math.hypot(r[2][0] - r[1][0], r[2][1] - r[1][1]);
+      if (lng / Math.max(1, wid) > 2.2 && r.length === 4) { p = r; roof = "gable"; roofH = Math.min(wid * 0.7, 30); }
+    }
+    // a round part of a domed church is its dome (St Paul's, the Pantheon)
+    if (lmInfo?.kind === "dome" && q.h > 15) {
+      let per = 0; for (let k = 0; k < p.length; k++) per += Math.hypot(p[(k + 1) % p.length][0] - p[k][0], p[(k + 1) % p.length][1] - p[k][1]);
+      const roundness = (4 * Math.PI * area) / Math.max(1, per * per);
+      if (roundness > 0.82 && p.length >= 8) { roof = "dome"; roofH = Math.sqrt(area / Math.PI) * 0.95; }
+    }
+    if (lmInfo?.colour) { tone = mix(lmInfo.colour as C3, tone, pal.night ? 0.6 : 0.1); roofTone = mix(lmInfo.colour as C3, roofTone, 0.4); }
+    const lmLabel = lmInfo ? `${lmInfo.name} · ${Math.round(lmInfo.h ?? total + roofH)} m` : label;
+    buildings.push({ p, h: q.h, z0: H(c[0], c[1]) + q.minH, roof, roofH: roof === "flat" ? 0 : roofH, tone, roofTone, label: lmLabel, landmark: !!q.name, c, i, house: roof === "gable" && area < 320, ...(q.lm ? { lm: q.lm } : {}) });
   });
 
   const autumnish = (c: number[]) => c[0] > c[1] * 1.02 && c[0] > 60;
@@ -120,10 +171,16 @@ export function buildWorld(b: SceneBundle, m: Moment, seed: number): World {
   for (const r of b.rail) roads.push({ pts: pv(r.pts), w: r.kind === "rail" ? 9 : 6, kind: "rail" });
 
   const [fx, fy] = toView(b.feature.x, b.feature.y);
+  const landmarks: WLandmark[] = (b.landmarks ?? []).map(l => {
+    const [x, y] = toView(l.x, l.y), icon = ICON[l.qid] ?? {};
+    const parts = buildings.filter(w => w.lm === l.qid);
+    const standOn = parts.length ? Math.max(...parts.map(w => w.z0 + w.h + w.roofH)) : undefined;
+    return { qid: l.qid, name: l.name, kind: l.kind, links: l.links, x, y, h: l.h, colour: (icon.colour ?? l.colour) as C3 | undefined, bands: icon.bands, base: l.base ? ccw(pv(l.base)) : undefined, line: l.line ? pv(l.line) : undefined, standOn };
+  });
   return {
     W, D, S, heading: h, kind: b.view.kind, cc: b.place.cc, pal, seed, moment: m, H, relief, baseShift: lo, absBase: b.terrain.base,
     water: b.water.map(poly => poly.map(r => pv(r))), land: b.land.map(pv), roads, buildings, trees, covers,
-    ferries: b.ferries.map(pv), canals: b.spawn.canals.map(pv), cables: (b.spawn.cables ?? []).map(pv), openWater: b.spawn.openWater.map(pv), parks: b.spawn.parks.map(pv), paths: b.spawn.paths.map(pv), pasture: b.spawn.pasture.map(pv),
+    ferries: b.ferries.map(pv), canals: b.spawn.canals.map(pv), cables: (b.spawn.cables ?? []).map(pv), landmarks, openWater: b.spawn.openWater.map(pv), parks: b.spawn.parks.map(pv), paths: b.spawn.paths.map(pv), pasture: b.spawn.pasture.map(pv),
     sunV, reliefV, reliefDif: flat ? 0.55 : Math.max(pal.dif, 0.45),
     shW: { dx: -Math.sin(azr), dy: -Math.cos(azr), perM: Math.min(1 / Math.tan(Math.max(sun.alt, 7) * Math.PI / 180), 6) },
     camPitch: b.view.pitch, farScreen: b.view.kind === "mountain" ? 0.24 : 0.2, farFade: b.view.kind === "mountain" ? 0.015 : 0.1, rock: b.view.kind === "mountain" || relief > 250,
